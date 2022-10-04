@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "alwaysShowHelp": false,
+    "showWelcomeScreen": false,
+    "enableVariables": false,
+    "enableConverters": false,
+    "enableDidYouMean": false,
+    "separateThousands": false,
+    "precision": 5,
+    "inputSign": "> ",
+    "logEnabled": false,
+    "logFilePath": "logs/",
+    "logTimeFormat": "[%d.%m.%Y|%H:%M:%S]"
+}

@@ -1,0 +1,668 @@
+#pragma once
+#ifndef KOROWA_LEXER_HPP
+#define KOROWA_LEXER_HPP
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <korowa/SyntaxError.hpp>
+#include <limits>
+#include <map>
+#include <my/extention/Math.hpp>
+#include <my/extention/NumParse.hpp>
+#include <my/printer/Format.hpp>
+#include <numeric>
+#include <queue>
+#include <stack>
+#include <vector>
+
+namespace korowa {
+
+namespace detail {
+
+enum Spec {
+    Unknown,
+    // Punctuation
+    LeftPars,
+    RightPars,
+    Comma,
+    // Specifiers
+    Number,
+    Variable,
+    Constant,
+    Consumer,
+    // Unary operators
+    Fact,
+    Placeholder1,
+    Placeholder2,
+    // Binary operators
+    Add,
+    Sub,
+    Div,
+    Mul,
+    Mod,
+    Pow,
+    // Unary functions
+    Sqrt,
+    Cbrt,
+    Factorial,
+    Abs,
+    Ln,
+    Lg,
+    Exp,
+    Ceil,
+    Floor,
+    Round,
+    Trunc,
+    Sin,
+    Cos,
+    Tan,
+    Ctan,
+    Asin,
+    Acos,
+    Atan,
+    Actan,
+    // Binary f-ns
+    Min,
+    Max,
+    Gcd,
+    Lcm,
+    Log,
+    // Calculus
+    Limit,
+    Derivative,
+    Integral,
+};
+
+struct Token {
+    Spec spec;
+    std::string value;
+};
+
+using TokenContainer = std::vector<Token>;
+using TokenQueue = std::queue<Token>;
+using TokenStack = std::stack<Token>;
+
+static inline bool isBinaryOp(Spec s) { return s >= Add and s <= Pow; }
+static inline bool isUnaryOp(Spec s) { return s >= Fact and s <= Placeholder2; }
+static inline bool isOperator(Spec s) { return s >= Fact and s <= Pow; }
+
+static inline bool isBinaryFn(Spec s) { return s >= Min and s <= Log; }
+static inline bool isUnaryFn(Spec s) { return s >= Sqrt and s <= Actan; }
+static inline bool isCalculusFn(Spec s) { return s >= Limit and s <= Integral; }
+static inline bool isFunction(Spec s) { return s >= Sqrt and s <= Integral; }
+
+static uint8_t getPrecedence(Spec s) {
+    switch (s) {
+        case LeftPars:
+        case RightPars:
+            return 0;
+        case Add:
+        case Sub:
+            return 1;
+        case Div:
+        case Mul:
+        case Mod:
+            return 2;
+        case Pow:
+            return 3;
+        default:
+            return 4;
+    }
+}
+
+static double performUnaryFn(Spec op, double a) {
+    switch (op) {
+        case Sqrt:
+            return std::sqrt(a);
+        case Cbrt:
+            return std::cbrt(a);
+        case Abs:
+            return std::fabs(a);
+        case Ln:
+            return std::log(a);
+        case Lg:
+            return std::log10(a);
+        case Exp:
+            return std::exp(a);
+        case Ceil:
+            return std::ceil(a);
+        case Floor:
+            return std::floor(a);
+        case Round:
+            return std::round(a);
+        case Trunc:
+            return std::trunc(a);
+        case Sin:
+            return std::sin(a);
+        case Cos:
+            return std::cos(a);
+        case Tan:
+            return std::tan(a);
+        case Ctan:
+            return std::tan(my::HALF_PI - a);
+        case Asin:
+            return std::asin(a);
+        case Acos:
+            return std::acos(a);
+        case Atan:
+            return std::atan(a);
+        case Actan:
+            return std::atan(my::HALF_PI - a);
+        case Factorial:
+        case Fact:
+            return std::tgamma(a + 1);
+        default:
+            return std::numeric_limits<double>::max();
+    }
+}
+
+static double performBinaryFn(Spec op, double a, double b) {
+    switch (op) {
+        case Add:
+            return (a + b);
+        case Sub:
+            return (a - b);
+        case Mul:
+            return (a * b);
+        case Div:
+            return (a / b);
+        case Mod:
+            return std::fmod(a, b);
+        case Pow:
+            return std::pow(a, b);
+        case Log:
+            return std::log(b) / std::log(a);
+        case Min:
+            return std::min(a, b);
+        case Max:
+            return std::max(a, b);
+        case Gcd:
+            return std::gcd((int)a, (int)b);
+        case Lcm:
+            return std::lcm((int)a, (int)b);
+        default:
+            return std::numeric_limits<double>::max();
+    }
+}
+
+static const std::map<std::string, double> constants{
+    {"pi", my::PI},
+    {"tau", my::TAU},
+    {"e", my::E},
+    {"phi", my::PHI},
+};
+
+static const std::vector<std::string> consumers{
+    "rnd",
+};
+
+TokenContainer tokenize(const std::string& expression) {
+    static const std::map<char, Spec> ops{
+        {'+', Add},
+        {'-', Sub},
+        {'/', Div},
+        {'*', Mul},
+        {'%', Mod},
+        {'!', Fact},
+        {'^', Pow},
+        {'(', LeftPars},
+        {')', RightPars},
+        {'{', LeftPars},
+        {'}', RightPars},
+        {',', Comma},
+    };
+
+    static const std::map<std::string, Spec> funcs{
+        {"fact", Factorial},
+        //
+        {"sqrt", Sqrt},
+        {"cbrt", Cbrt},
+        //
+        {"ln", Ln},
+        {"lg", Lg},
+        {"exp", Exp},
+        //
+        {"ceil", Ceil},
+        {"floor", Floor},
+        {"round", Round},
+        {"trunc", Trunc},
+        //
+        {"sin", Sin},
+        {"cos", Cos},
+        {"tan", Tan},
+        {"ctan", Ctan},
+        {"asin", Asin},
+        {"acos", Acos},
+        {"atan", Atan},
+        {"actan", Actan},
+        //
+        {"min", Min},
+        {"max", Max},
+        {"gcd", Gcd},
+        {"lcm", Lcm},
+        {"log", Log},
+        {"abs", Abs},
+        //
+        {"lim", Limit},
+        {"dt", Derivative},
+        {"Int", Integral},
+    };
+
+    enum State {
+        OperatorState,
+        UnaryOperatorState,
+        NumberState,
+        FractionState,
+        VariableState,
+        FunctionState,
+        BeginState,
+    } state = BeginState;
+
+    TokenContainer tokens;
+    tokens.reserve(expression.size());
+
+    for (const auto& ch : expression) {
+        auto& last = tokens.back();
+
+        switch (state) {
+            case BeginState: {
+                if (std::isdigit(ch)) {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = NumberState;
+                    break;
+                }
+                if (ch == '.') {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = FractionState;
+                    break;
+                }
+                if (std::isalpha(ch)) {
+                    auto conv = std::string(1, ch);
+                    tokens.push_back({constants.find(conv) != constants.end()
+                                          ? Constant
+                                      : consumers.find(conv) != consumers.end()
+                                          ? Consumer
+                                          : Variable,
+                                      conv});
+                    state = VariableState;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    if (it->second == Sub) {
+                        tokens.push_back({Number, "-1"});
+                        tokens.push_back({Mul, "*"});
+                        break;
+                    }
+                    if (it->second == Add) break;
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+            case NumberState: {
+                if (std::isdigit(ch)) {
+                    last.value.push_back(ch);
+                    break;
+                }
+                if (ch == '.') {
+                    last.value.push_back(ch);
+                    state = FractionState;
+                    break;
+                }
+                if (std::isalpha(ch)) {
+                    tokens.push_back({Mul, "*"});
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    if (it->second == LeftPars) tokens.push_back({Mul, "*"});
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                    break;
+                }
+                if (ch == '\'') {
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+
+            case FractionState: {
+                if (std::isdigit(ch)) {
+                    last.value.push_back(ch);
+                    break;
+                }
+                if (std::isalpha(ch)) {
+                    tokens.push_back({Mul, "*"});
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    if (it->second == LeftPars) tokens.push_back({Mul, "*"});
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+            case VariableState: {
+                if (std::isdigit(ch)) {
+                    last.value.push_back(ch);
+                    break;
+                }
+                if (std::isalpha(ch)) {
+                    last.value.push_back(ch);
+                    if (auto it = funcs.find(last.value); it != funcs.end()) {
+                        last.spec = it->second;
+                        state = FunctionState;
+                        break;
+                    }
+                    if (constants.find(last.value) != constants.end()) {
+                        last.spec = Constant;
+                        break;
+                    }
+                    if (consumers.find(last.value) != consumers.end()) {
+                        last.spec = Consumer;
+                        break;
+                    }
+
+                    last.spec = Variable;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    if (constants.find(last.value) != constants.end()) {
+                        last.spec = Constant;
+                    }
+
+                    else if (consumers.find(last.value) != consumers.end()) {
+                        last.spec = Consumer;
+                    }
+
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+            case OperatorState: {
+                if (std::isdigit(ch)) {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = NumberState;
+                    break;
+                }
+                if (ch == '.') {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = FractionState;
+                    break;
+                }
+                if (std::isalpha(ch)) {
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    auto& curr = it->second;
+                    auto& prev = last.spec;
+                    if (curr == LeftPars and prev == RightPars) {
+                        tokens.push_back({Mul, "*"});
+                        break;
+                    }
+                    if (curr == Mul and prev == Mul) {
+                        prev = Pow;
+                        last.value.push_back('*');
+                        break;
+                    }
+                    if (curr == Sub and prev != RightPars and not isUnaryOp(prev)) {
+                        tokens.push_back({Number, "-1"});
+                        tokens.push_back({Mul, "*"});
+                        state = UnaryOperatorState;
+                        break;
+                    }
+                    if (curr == Add and prev != RightPars and not isUnaryOp(prev)) {
+                        state = UnaryOperatorState;
+                        break;
+                    }
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+            case UnaryOperatorState: {
+                if (std::isdigit(ch)) {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = NumberState;
+                    break;
+                }
+                if (ch == '.') {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = FractionState;
+                    break;
+                }
+                if (std::isalpha(ch)) {
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    if (it->second == LeftPars) state = OperatorState;
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+            case FunctionState: {
+                if (std::isdigit(ch) or std::isalpha(ch)) {
+                    last.value.push_back(ch);
+                    last.spec = Variable;
+                    state = VariableState;
+                    break;
+                }
+                if (auto it = ops.find(ch); it != ops.end()) {
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                    break;
+                }
+                if (!std::isblank(ch)) {
+                    tokens.push_back({Unknown, std::string(1, ch)});
+                }
+                break;
+            }
+        }
+    }
+
+    return tokens;
+}
+
+TokenQueue parse(const TokenContainer& tokens, SyntaxError& err) {
+    TokenQueue output;
+    TokenStack operators;
+
+    if (auto it = std::find_if(tokens.begin(), tokens.end(),
+                               [](auto el) { return el.spec == Unknown; });
+        it != tokens.end()) {
+        err = SyntaxError(
+            my::format("Unknown symbol: [{}] (:{})",
+                       it->value, std::distance(tokens.begin(), it)));
+        return output;
+    }
+
+    size_t index = 0;
+    for (const auto& token : tokens) {
+        if (token.spec == Number or
+            token.spec == Variable or
+            token.spec == Constant)
+            output.push(token);
+
+        else if (isUnaryOp(token.spec))
+            output.push(token);
+
+        else if (isFunction(token.spec) or token.spec == LeftPars)
+            operators.push(token);
+
+        else if (isBinaryOp(token.spec)) {
+            while (not operators.empty() and
+                   getPrecedence(operators.top().spec) >= getPrecedence(token.spec)) {
+                output.push(operators.top());
+                operators.pop();
+            }
+            operators.push(token);
+        }
+
+        else if (token.spec == Comma) {
+            if (operators.empty()) {
+                err = SyntaxError(
+                    my::format("Mismatched parenthesis or function argument separators (,) (:{})",
+                               index),
+                    SyntaxError::Type::Parsing);
+                return output;
+            }
+            while (operators.top().spec != LeftPars) {
+                output.push(operators.top());
+                operators.pop();
+                if (operators.empty()) {
+                    err = SyntaxError(
+                        my::format("Mismatched parenthesis or function argument separators (,) (:{})",
+                                   index),
+                        SyntaxError::Type::Parsing);
+                    return output;
+                }
+            }
+        }
+
+        else if (token.spec == RightPars) {
+            if (operators.empty()) {
+                err = SyntaxError(my::format("Mismatched parenthesis (:{})", index),
+                                  SyntaxError::Type::Parsing);
+                return output;
+            }
+            while (operators.top().spec != LeftPars) {
+                output.push(operators.top());
+                operators.pop();
+                if (operators.empty()) {
+                    err = SyntaxError(my::format("Mismatched parenthesis (:{})", index),
+                                      SyntaxError::Type::Parsing);
+                    return output;
+                }
+            }
+            operators.pop();
+            if (not operators.empty() and isFunction(operators.top().spec)) {
+                output.push(operators.top());
+                operators.pop();
+            }
+        }
+        index++;
+    }
+
+    while (operators.size()) {
+        if (operators.top().spec == LeftPars) {
+            err = SyntaxError(my::format("Mismatched parenthesis (:{})", index),
+                              SyntaxError::Type::Parsing);
+            return output;
+        }
+        output.push(operators.top());
+        operators.pop();
+    }
+
+    return output;
+}
+
+}  // namespace detail
+
+double eval(const std::string& input, SyntaxError& err) {
+    using namespace detail;
+#define getNumOrError(name)                                                   \
+    if (evalStack.empty()) {                                                  \
+        err = SyntaxError("Evaluation error", SyntaxError::Type::Evaluation); \
+        return NAN;                                                           \
+    }                                                                         \
+    auto name = evalStack.back();                                             \
+    evalStack.pop_back();
+
+    auto tokens = tokenize(input);
+    auto tokenQueue = parse(tokens, err);
+
+    if (err) return NAN;
+    if (tokenQueue.empty()) {
+        err = SyntaxError("Empty expression",
+                          SyntaxError::Type::Evaluation);
+        return NAN;
+    }
+
+    std::vector<double> evalStack;
+    while (not tokenQueue.empty()) {
+        if (isBinaryFn(tokenQueue.front().spec) or
+            isBinaryOp(tokenQueue.front().spec)) {
+            getNumOrError(b);
+            getNumOrError(a);
+
+            evalStack.push_back(performBinaryFn(tokenQueue.front().spec, a, b));
+            tokenQueue.pop();
+        }
+
+        else if (isUnaryFn(tokenQueue.front().spec) or
+                 isUnaryOp(tokenQueue.front().spec)) {
+            getNumOrError(a);
+
+            evalStack.push_back(performUnaryFn(tokenQueue.front().spec, a));
+            tokenQueue.pop();
+        }
+
+        else if (tokenQueue.front().spec == Number) {
+            evalStack.push_back(my::parse<double>(tokenQueue.front().value));
+            tokenQueue.pop();
+        }
+
+        else if (tokenQueue.front().spec == Constant) {
+            evalStack.push_back(constants.at(tokenQueue.front().value));
+            tokenQueue.pop();
+        }
+
+        else if (tokenQueue.front().spec == Consumer) {
+            evalStack.push_back(consumers.at(tokenQueue.front().value));
+            tokenQueue.pop();
+        }
+
+        else if (tokenQueue.front().spec == Variable) {
+            err = SyntaxError("Not yet implemented: [Variables]",
+                              SyntaxError::Type::Evaluation);
+            return NAN;
+        }
+    }
+
+    if (evalStack.size() > 1) {
+        err = SyntaxError(my::format("Redundant values: {}", my::join(evalStack)),
+                          SyntaxError::Type::Evaluation);
+        return NAN;
+    }
+
+    return evalStack.back();  // top
+}
+
+double eval(const std::string& input) {
+    [[maybe_unused]] SyntaxError err;
+    return eval(input, err);
+}
+
+}  // namespace korowa
+#endif  // LEXER_HPP

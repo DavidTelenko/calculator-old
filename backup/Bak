@@ -1,0 +1,534 @@
+#pragma once
+#ifndef KOROWA_LEXER_HPP
+#define KOROWA_LEXER_HPP
+
+#define _USE_MATH_DEFINES
+#include <cctype>
+#include <cmath>
+#include <iostream>
+#include <map>
+#include <queue>
+#include <stack>
+#include <string>
+#include <vector>
+
+#include "Printers.hpp"
+
+namespace korowa {
+
+enum Spec {
+    Unknown,
+    // Punctuation
+    LeftPars,
+    RightPars,
+    Comma,
+    // Specifiers
+    Number,
+    Variable,
+    // Operators
+    Add,
+    Sub,
+    Div,
+    Mul,
+    Mod,
+    Pow,
+    // Unary functions
+    Sqrt,
+    //
+    Factorial,
+    // Trigonometry
+    Sin,
+    Cos,
+    Tan,
+    Ctan,
+    Asin,
+    Acos,
+    Atan,
+    Actan,
+    // Binary f-ns
+    Min,
+    Max,
+    Log,
+    // Calculus
+    Limit,
+    Derivative,
+    Integral,
+};
+
+static inline const std::map<Spec, std::string> specNames{
+    {Number, "Number"},
+    {Variable, "Variable"},
+
+    {Add, "Add"},
+    {Sub, "Sub"},
+    {Div, "Div"},
+    {Mul, "Mul"},
+    {Mod, "Mod"},
+
+    {Pow, "Pow"},
+    {Sqrt, "Sqrt"},
+    {Log, "Log"},
+
+    {Limit, "Limit"},
+    {Derivative, "Derivative"},
+    {Integral, "Integral"},
+
+    {Min, "Min"},
+    {Max, "Max"},
+    {Factorial, "Factorial"},
+
+    {Sin, "Sin"},
+    {Cos, "Cos"},
+    {Tan, "Tan"},
+    {Ctan, "Ctan"},
+    {Asin, "Asin"},
+    {Acos, "Acos"},
+    {Atan, "Atan"},
+    {Actan, "Actan"},
+
+    {LeftPars, "LeftPars"},
+    {RightPars, "RightPars"},
+    {Comma, "Comma"},
+
+    {Unknown, "ErrorFlag"},
+};
+
+struct Token {
+    Spec spec;
+    std::string value;
+};
+
+std::ostream& operator<<(std::ostream& os, const Token& t) {
+    if (auto it = specNames.find(t.spec); it != specNames.end())
+        os << "{" << it->second << ": '" << t.value << "'}";
+    else
+        os << "Unknown beast???";
+    return os;
+}
+
+using TokenContainer = std::vector<Token>;
+using TokenQueue = std::queue<Token>;
+using TokenStack = std::stack<Token>;
+
+static inline bool isOperator(Spec s) { return s >= 6 and s <= 11; }
+
+static inline bool isFunction(Spec s) { return s >= 12 and s <= 27; }
+
+static inline bool isUnaryFn(Spec s) { return s >= 12 and s <= 21; }
+
+static inline bool isBinaryFn(Spec s) { return s >= 22 and s <= 24; }
+
+static inline bool isCalculusFn(Spec s) { return s >= 25 and s <= 27; }
+
+static unsigned char getPrecedence(Spec s) {
+    switch (s) {
+        case LeftPars:
+        case RightPars:
+            return 0;  // specific for mine implementation
+        case Add:
+        case Sub:
+            return 1;
+        case Div:
+        case Mul:
+        case Mod:
+            return 2;
+        case Pow:
+            return 3;
+        default:
+            return 4;
+    }
+}
+
+static double performUnaryFn(Spec op, double a) {
+    switch (op) {
+        case Sqrt:
+            return std::sqrt(a);
+        //
+        case Sin:
+            return std::sin(a);
+        case Cos:
+            return std::cos(a);
+        case Tan:
+            return std::tan(a);
+        case Ctan:
+            return std::tan(M_PI_2 - a);
+        case Asin:
+            return std::asin(a);
+        case Acos:
+            return std::acos(a);
+        case Atan:
+            return std::atan(a);
+        case Actan:
+            return std::atan(M_PI_2 - a);
+        //
+        case Factorial:
+            return std::tgamma(a + 1);
+        //
+        default:
+            return (double)((size_t)-1);
+    }
+}
+
+static double performBinaryFn(Spec op, double a, double b) {
+    switch (op) {
+        case Add:
+            return (a + b);
+        case Sub:
+            return (a - b);
+        case Mul:
+            return (a * b);
+        case Div:
+            return (a / b);
+        case Mod:
+            return std::fmod(a, b);
+        //
+        case Pow:
+            return std::pow(a, b);
+        case Log:
+            return std::log(b) / std::log(a);
+        //
+        case Min:
+            return std::min(a, b);
+        case Max:
+            return std::max(a, b);
+        //
+        default:
+            return (double)((size_t)-1);
+    }
+}
+
+TokenContainer tokenize(const std::string& expression) {
+    static const std::map<char, Spec> ops{
+        {'+', Add},
+        {'-', Sub},
+        {'/', Div},
+        {'*', Mul},
+        {'%', Mod},
+        {'^', Pow},
+        {'(', LeftPars},
+        {')', RightPars},
+        {'{', LeftPars},
+        {'}', RightPars},
+        {',', Comma},
+    };
+
+    static const std::map<std::string, Spec> funcs{
+        {"fact", Factorial},
+        //
+        {"sqrt", Sqrt},
+        //
+        {"sin", Sin},
+        {"cos", Cos},
+        {"tan", Tan},
+        {"ctan", Ctan},
+        {"asin", Asin},
+        {"acos", Acos},
+        {"atan", Atan},
+        {"actan", Actan},
+        //
+        {"min", Min},
+        {"max", Max},
+        {"log", Log},
+        //
+        {"lim", Limit},
+        {"dt", Derivative},
+        {"Int", Integral},
+    };
+
+    enum State {
+        OperatorState,
+        NumberState,
+        VariableState,
+        FunctionState,
+        ReadingState,
+    } state = ReadingState;
+
+    TokenContainer tokens;
+
+    for (const auto& ch : expression) {
+        switch (state) {
+            case ReadingState:  // beggining state
+                if (std::isdigit(ch) or ch == '.') {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = NumberState;
+                } else if (std::isalpha(ch)) {
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                } else if (auto it = ops.find(ch); it != ops.end()) {
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                }
+                break;
+
+            case NumberState:  // digit or '.' found
+                if (std::isdigit(ch) or ch == '.') {
+                    tokens.back().value.push_back(ch);
+                } else if (std::isalpha(ch)) {
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                } else if (auto it = ops.find(ch); it != ops.end()) {
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                } else if (std::isblank(ch)) {
+                    state = ReadingState;
+                }
+                break;
+
+            case VariableState:  // alphabetical char or digit after char found
+                if (std::isdigit(ch)) {
+                    tokens.back().value.push_back(ch);
+                } else if (std::isalpha(ch)) {
+                    tokens.back().value.push_back(ch);
+                    if (auto it = funcs.find(tokens.back().value); it != funcs.end()) {
+                        tokens.back().spec = it->second;
+                        state = FunctionState;
+                    }
+                } else if (auto it = ops.find(ch); it != ops.end()) {
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                } else if (std::isblank(ch)) {
+                    state = ReadingState;
+                }
+                break;
+
+            case OperatorState:  // one of possible operators found in ops map
+                if (std::isdigit(ch) or ch == '.') {
+                    tokens.push_back({Number, std::string(1, ch)});
+                    state = NumberState;
+                } else if (std::isalpha(ch)) {
+                    tokens.push_back({Variable, std::string(1, ch)});
+                    state = VariableState;
+                } else if (auto it = ops.find(ch); it != ops.end()) {
+                    tokens.push_back({it->second, std::string(1, ch)});
+                }
+                break;
+
+            case FunctionState:  // specific sequence of chars representing math function found
+                if (std::isdigit(ch) or std::isalpha(ch)) {
+                    tokens.back().value.push_back(ch);
+                    tokens.back().spec = Variable;
+                    state = VariableState;
+                } else if (auto it = ops.find(ch); it != ops.end()) {
+                    tokens.push_back({it->second, std::string(1, ch)});
+                    state = OperatorState;
+                }
+                break;
+        }
+    }
+    std::cout << std::endl;
+    for (const auto& el : tokens)
+        std::cout << "'" << el.value << "', ";
+    std::cout << std::endl;
+    return tokens;
+}
+
+enum SyntaxError {
+    Ok,
+    MismatchedPars,
+    MismatchedSepsOrPars,
+    EvaluationError,
+    UnknownSymbol,
+};
+
+static inline const std::map<SyntaxError, std::string> errNames{
+    {Ok, "Ok"},
+    {MismatchedPars, "Mismatched parenthesis"},
+    {MismatchedSepsOrPars, "Mismatched parenthesis or function argument separators (,)"},
+    {EvaluationError, "Evaluation error"},
+    {UnknownSymbol, "UnknownSymbol"},
+};
+
+std::ostream& operator<<(std::ostream& os, const SyntaxError& err) {
+    if (auto it = errNames.find(err); it != errNames.end())
+        os << it->second;
+    else
+        os << "Unknown beast???";
+    return os;
+}
+
+TokenQueue parse(const TokenContainer& tokens, SyntaxError& err) {
+    TokenQueue output;
+    TokenStack operators;
+    err = Ok;
+
+    for (const auto& token : tokens) {
+        if (token.spec == Number or token.spec == Variable)
+            output.push(token);
+
+        else if (token.spec == LeftPars or isFunction(token.spec))
+            operators.push(token);
+
+        else if (isOperator(token.spec)) {
+            while (not operators.empty() and
+                   getPrecedence(operators.top().spec) >= getPrecedence(token.spec)) {
+                output.push(operators.top());
+                operators.pop();
+            }
+            operators.push(token);
+        }
+
+        else if (token.spec == Comma) {
+            if (operators.empty()) {
+                err = MismatchedSepsOrPars;
+                return output;
+            }
+            while (operators.top().spec != LeftPars) {
+                output.push(operators.top());
+                operators.pop();
+                if (operators.empty()) {
+                    err = MismatchedSepsOrPars;
+                    return output;
+                }
+            }
+        }
+
+        else if (token.spec == RightPars) {
+            if (operators.empty()) {
+                err = MismatchedPars;
+                return output;
+            }
+            while (operators.top().spec != LeftPars) {
+                output.push(operators.top());
+                operators.pop();
+                if (operators.empty()) {
+                    err = MismatchedPars;
+                    return output;
+                }
+            }
+            operators.pop();
+            if (not operators.empty() and isFunction(operators.top().spec)) {
+                output.push(operators.top());
+                operators.pop();
+            }
+        }
+    }
+
+    while (not operators.empty()) {
+        if (operators.top().spec == LeftPars) {
+            err = MismatchedPars;
+            return output;
+        }
+        output.push(operators.top());
+        operators.pop();
+    }
+
+    // std::cout << "\n------- Postfix -------" << std::endl;
+    // printQueue(output);
+    // std::cout << "---- End of Postfix ----\n"
+    //           << std::endl;
+
+    return output;
+}
+
+static SyntaxError errStub = Ok;
+
+#define getNumOrError(name)      \
+    if (evalStack.empty()) {     \
+        err = EvaluationError;   \
+        return NAN;              \
+    }                            \
+    auto name = evalStack.top(); \
+    evalStack.pop();
+
+double eval(const std::string& input, SyntaxError& err = errStub) {
+    auto error = Ok;
+    auto tokens = korowa::tokenize(input);
+    auto tokenQueue = korowa::parse(tokens, error);
+    if (error != Ok or tokenQueue.empty()) {
+        err = error;
+        return NAN;
+    }
+    std::stack<double> evalStack;
+
+    while (not tokenQueue.empty()) {
+        if (isBinaryFn(tokenQueue.front().spec) or
+            isOperator(tokenQueue.front().spec)) {
+            getNumOrError(b);
+            getNumOrError(a);
+
+            evalStack.push(performBinaryFn(tokenQueue.front().spec, a, b));
+            tokenQueue.pop();
+        }
+
+        else if (isUnaryFn(tokenQueue.front().spec)) {
+            getNumOrError(a);
+
+            evalStack.push(performUnaryFn(tokenQueue.front().spec, a));
+            tokenQueue.pop();
+        }
+
+        else if (tokenQueue.front().spec == Number) {
+            evalStack.push(std::stod(tokenQueue.front().value));
+            tokenQueue.pop();
+        }
+
+        else if (tokenQueue.front().spec == Variable) {
+            err = EvaluationError;
+            return NAN;
+        }
+    }
+
+    if (evalStack.size() > 1)
+        err = EvaluationError;
+
+    return evalStack.top();
+}
+
+#undef getNumOrError
+
+}  // namespace korowa
+#endif  //LEXER_HPP
+
+
+#if 0
+
+auto main() -> int {
+    std::string expr;
+
+    // dec:bin 342 = 101010110
+    // dec:oct 342 = 526
+    // dec:dec 342 = 342
+    // dec:hex 342 = 156
+
+    expr = "dec:bin 342";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "dec:oct 342";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "dec:dec 342";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "dec:hex 342";
+    my::printf("{} = {}\n\n", expr, korowa::convert(expr));
+
+    expr = "bin:bin 101010110";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "bin:oct 101010110";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "bin:dec 101010110";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "bin:hex 101010110";
+    my::printf("{} = {}\n\n", expr, korowa::convert(expr));
+
+    expr = "oct:bin 526";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "oct:oct 526";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "oct:dec 526";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "oct:hex 526";
+    my::printf("{} = {}\n\n", expr, korowa::convert(expr));
+
+    expr = "hex:bin 156";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "hex:oct 156";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "hex:dec 156";
+    my::printf("{} = {}\n", expr, korowa::convert(expr));
+    expr = "hex:hex 156";
+    my::printf("{} = {}\n\n", expr, korowa::convert(expr));
+
+    //-------------do not write code after this line----------------
+    system("pause > nul");
+    return 0;
+}
+
+#endif

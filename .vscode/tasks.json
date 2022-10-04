@@ -1,0 +1,62 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "shell",
+            "label": "Build Debug",
+            "command": "C:\\Program Files\\mingw64\\bin\\g++.exe",
+            "args": [
+                "-fcompare-debug-second",
+                "-static",
+                "-static-libgcc",
+                "-static-libstdc++",
+                "-std=c++1z",
+                "-I",
+                "C:\\Program Files\\Libraries\\cpp",
+                "-I",
+                "${workspaceFolder}\\include",
+                "-g",
+                "${file}",
+                "-o",
+                "${workspaceFolder}\\debug\\${fileBasenameNoExtension}.exe"
+            ],
+            "options": {
+                "cwd": "C:\\Program Files\\mingw64\\bin"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "type": "shell",
+            "label": "Build Release",
+            "command": "C:\\Program Files\\mingw64\\bin\\g++.exe",
+            "args": [
+                "-std=c++1z",
+                "-O3",
+                "-s",
+                "-DNDEBUG",
+                "-static",
+                "-static-libgcc",
+                "-static-libstdc++",
+                // "-O2",
+                "-I",
+                "C:\\Program Files\\Libraries\\cpp",
+                "-I",
+                "${workspaceFolder}\\include",
+                "-g",
+                "${file}",
+                "-o",
+                "${workspaceFolder}\\release\\${fileBasenameNoExtension}.exe",
+            ],
+            "options": {
+                "cwd": "C:\\Program Files\\mingw64\\bin"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+    ],
+}
